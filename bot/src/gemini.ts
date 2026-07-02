@@ -20,10 +20,10 @@ ZORUNLU ÜSLUP KURALLARI (buna kesinlikle uy):
 `.trim();
 
 const DEFAULT_MODELS = [
-  "gemini-2.5-flash-lite",
-  "gemini-2.5-flash",
   "gemini-2.0-flash-lite",
   "gemini-2.0-flash",
+  "gemini-2.5-flash-lite",
+  "gemini-2.5-flash",
 ];
 
 let client: GoogleGenerativeAI | null = null;
@@ -84,9 +84,16 @@ function isQuotaError(message: string): boolean {
   return /429|quota|rate limit|too many requests/i.test(message);
 }
 
+function isTransientError(message: string): boolean {
+  return /503|502|500|service unavailable|high demand|overloaded|try again later/i.test(
+    message
+  );
+}
+
 function shouldTryNextModel(message: string): boolean {
   return (
     isQuotaError(message) ||
+    isTransientError(message) ||
     /404|not found|not supported for generatecontent/i.test(message)
   );
 }
@@ -110,7 +117,7 @@ async function generateText(prompt: string): Promise<string | null> {
     const model = createModel(modelName);
     if (!model) return null;
 
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < 3; attempt++) {
       try {
         await waitForGeminiSlot();
         const result = await model.generateContent(prompt);
@@ -120,9 +127,20 @@ async function generateText(prompt: string): Promise<string | null> {
         const message = err instanceof Error ? err.message : String(err);
         const retryMs = parseRetryMs(message);
 
+        if (isTransientError(message) && attempt < 2) {
+          const wait = retryMs ?? 8000 + attempt * 7000;
+          console.warn(
+            `[Gemini] Yoğunluk (${modelName}) — ${Math.round(wait / 1000)} sn sonra tekrar`
+          );
+          await sleep(wait);
+          continue;
+        }
+
         if (shouldTryNextModel(message)) {
-          if (isQuotaError(message) && retryMs && attempt === 0) {
-            console.warn(`[Gemini] Kota — ${Math.round(retryMs / 1000)} sn bekleniyor (${modelName})`);
+          if (isQuotaError(message) && retryMs && attempt < 2) {
+            console.warn(
+              `[Gemini] Kota — ${Math.round(retryMs / 1000)} sn bekleniyor (${modelName})`
+            );
             await sleep(retryMs);
             continue;
           }
