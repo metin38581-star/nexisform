@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS public.forum_users (
   gender TEXT NOT NULL CHECK (gender IN ('erkek', 'kadin', 'bot')),
   nexis_point INTEGER NOT NULL DEFAULT 0,
   auth_id UUID UNIQUE,
+  password_hash TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

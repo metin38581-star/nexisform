@@ -43,6 +43,7 @@ export function AuthModal({
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (loading) return;
     setError(null);
 
     if (!email.trim() || !password.trim()) {

@@ -1,4 +1,3 @@
-import { getSupabase } from "@/lib/supabase";
 import type { Gender, SessionUser } from "@/lib/types";
 
 const STORAGE_KEY = "nexis_forum_session";
@@ -41,19 +40,8 @@ export function clearSessionFromStorage(): void {
   window.localStorage.removeItem(STORAGE_KEY);
 }
 
-async function fetchForumUserByEmail(email: string): Promise<SessionUser | null> {
-  const supabase = getSupabase();
-  const { data, error } = await supabase
-    .from("forum_users")
-    .select("id, username, email, gender, nexis_point")
-    .eq("email", email.trim().toLowerCase())
-    .maybeSingle();
-
-  if (error || !data) return null;
-  return mapToSessionUser(data);
-}
-
 async function fetchForumUserById(id: string): Promise<SessionUser | null> {
+  const { getSupabase } = await import("@/lib/supabase");
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from("forum_users")
@@ -65,31 +53,42 @@ async function fetchForumUserById(id: string): Promise<SessionUser | null> {
   return mapToSessionUser(data);
 }
 
+async function authFetch<T>(
+  path: string,
+  body: Record<string, unknown>
+): Promise<T> {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  const data = (await res.json()) as T & { error?: string };
+
+  if (!res.ok) {
+    throw new Error(
+      data.error ??
+        (res.status === 429
+          ? "Çok fazla deneme yapıldı. Lütfen birkaç dakika bekleyin."
+          : "İşlem başarısız.")
+    );
+  }
+
+  return data;
+}
+
 export async function restoreSession(): Promise<SessionUser | null> {
-  const supabase = getSupabase();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
-  if (session?.user.email) {
-    const profile = await fetchForumUserByEmail(session.user.email);
-    if (profile) {
-      writeSessionToStorage(profile);
-      return profile;
-    }
-  }
-
   const stored = readSessionFromStorage();
-  if (stored) {
-    const profile = await fetchForumUserById(stored.id);
-    if (profile) {
-      writeSessionToStorage(profile);
-      return profile;
-    }
+  if (!stored) return null;
+
+  const profile = await fetchForumUserById(stored.id);
+  if (!profile) {
+    clearSessionFromStorage();
+    return null;
   }
 
-  clearSessionFromStorage();
-  return null;
+  writeSessionToStorage(profile);
+  return profile;
 }
 
 export async function signUp(params: {
@@ -98,45 +97,13 @@ export async function signUp(params: {
   password: string;
   gender: Gender;
 }): Promise<SessionUser> {
-  const supabase = getSupabase();
-  const email = params.email.trim().toLowerCase();
-  const username = params.username.trim();
+  const { user } = await authFetch<{ user: SessionUser }>(
+    "/api/auth/register",
+    params
+  );
 
-  const { data: authData, error: authError } = await supabase.auth.signUp({
-    email,
-    password: params.password,
-  });
-
-  if (authError) {
-    throw new Error(authError.message);
-  }
-
-  const { data: profile, error: profileError } = await supabase
-    .from("forum_users")
-    .insert({
-      username,
-      email,
-      gender: params.gender,
-      auth_id: authData.user?.id ?? null,
-      nexis_point: 0,
-    })
-    .select("id, username, email, gender, nexis_point")
-    .single();
-
-  if (profileError || !profile) {
-    throw new Error(profileError?.message ?? "Profil oluşturulamadı.");
-  }
-
-  const sessionUser = mapToSessionUser(profile);
+  const sessionUser = mapToSessionUser(user);
   writeSessionToStorage(sessionUser);
-
-  if (!authData.session) {
-    await supabase.auth.signInWithPassword({
-      email,
-      password: params.password,
-    });
-  }
-
   return sessionUser;
 }
 
@@ -144,29 +111,16 @@ export async function signIn(
   email: string,
   password: string
 ): Promise<SessionUser> {
-  const supabase = getSupabase();
-  const normalizedEmail = email.trim().toLowerCase();
-
-  const { error: authError } = await supabase.auth.signInWithPassword({
-    email: normalizedEmail,
+  const { user } = await authFetch<{ user: SessionUser }>("/api/auth/login", {
+    email,
     password,
   });
 
-  if (authError) {
-    throw new Error(authError.message);
-  }
-
-  const profile = await fetchForumUserByEmail(normalizedEmail);
-  if (!profile) {
-    throw new Error("Forum profili bulunamadı.");
-  }
-
-  writeSessionToStorage(profile);
-  return profile;
+  const sessionUser = mapToSessionUser(user);
+  writeSessionToStorage(sessionUser);
+  return sessionUser;
 }
 
 export async function logout(): Promise<void> {
-  const supabase = getSupabase();
-  await supabase.auth.signOut();
   clearSessionFromStorage();
 }
