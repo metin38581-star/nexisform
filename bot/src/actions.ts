@@ -7,10 +7,10 @@ import {
   CATEGORIES,
 } from "./generators.js";
 import {
-  geminiCooldown,
   generateHumanAnswer,
   generateHumanQuestion,
-} from "./gemini.js";
+  llmCooldown,
+} from "./openai.js";
 import { BotQuestion, BotUser, getBotSupabase } from "./supabase.js";
 
 export interface FullQuestion extends BotQuestion {
@@ -62,7 +62,7 @@ export async function createBotQuestion(
   const category = pickRandom(CATEGORIES);
 
   const generated = await generateHumanQuestion(category, user);
-  await geminiCooldown();
+  await llmCooldown();
 
   const slug = generateSlug(generated.title);
 
@@ -113,7 +113,7 @@ export async function createBotAnswer(
     },
     user
   );
-  await geminiCooldown();
+  await llmCooldown();
 
   const { error } = await supabase.from("forum_answers").insert({
     question_id: question.id,

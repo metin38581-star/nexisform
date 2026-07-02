@@ -9,39 +9,77 @@ export const CATEGORIES = [
 ] as const;
 
 const FEMALE_NAMES = [
-  "ayse",
-  "zeynep",
-  "elif",
-  "derya",
-  "melis",
-  "busra",
-  "seda",
-  "cansu",
-  "irem",
-  "yasemin",
-  "hande",
-  "pinar",
-  "ece",
-  "deniz",
-  "selin",
+  "Ayşe",
+  "Zeynep",
+  "Elif",
+  "Derya",
+  "Melis",
+  "Büşra",
+  "Seda",
+  "Cansu",
+  "İrem",
+  "Yasemin",
+  "Hande",
+  "Pınar",
+  "Ece",
+  "Deniz",
+  "Selin",
+  "Esra",
+  "Gamze",
+  "Tuğba",
+  "Merve",
+  "Damla",
 ];
 
 const MALE_NAMES = [
-  "mehmet",
-  "can",
-  "emre",
-  "burak",
-  "kerem",
-  "onur",
-  "mert",
-  "baris",
-  "kadir",
-  "tolga",
-  "serkan",
-  "alp",
-  "yusuf",
-  "oguz",
-  "efe",
+  "Mehmet",
+  "Can",
+  "Emre",
+  "Burak",
+  "Kerem",
+  "Onur",
+  "Mert",
+  "Barış",
+  "Kadir",
+  "Tolga",
+  "Serkan",
+  "Alp",
+  "Yusuf",
+  "Oğuz",
+  "Efe",
+  "Murat",
+  "Berk",
+  "Cem",
+  "Umut",
+  "Kaan",
+];
+
+const SURNAMES = [
+  "Yılmaz",
+  "Kaya",
+  "Demir",
+  "Çelik",
+  "Şahin",
+  "Yıldız",
+  "Aydın",
+  "Öztürk",
+  "Arslan",
+  "Doğan",
+  "Kılıç",
+  "Aslan",
+  "Koç",
+  "Kurt",
+  "Polat",
+  "Erdoğan",
+  "Güneş",
+  "Aksoy",
+  "Tekin",
+  "Bulut",
+  "Taş",
+  "Karaca",
+  "Özkan",
+  "Acar",
+  "Kaplan",
 ];
 
 const QUESTION_TEMPLATES: Record<string, { titles: string[]; bodies: string[] }> = {
@@ -171,11 +209,49 @@ export function randomInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+function usernamePart(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/ı/g, "i")
+    .replace(/ğ/g, "g")
+    .replace(/ü/g, "u")
+    .replace(/ş/g, "s")
+    .replace(/ö/g, "o")
+    .replace(/ç/g, "c")
+    .replace(/İ/g, "i");
+}
+
 export function generateUsername(): { username: string; gender: "erkek" | "kadin" } {
   const isFemale = Math.random() > 0.5;
-  const base = pickRandom(isFemale ? FEMALE_NAMES : MALE_NAMES);
-  const suffix = randomInt(10, 9999);
-  return { username: `${base}${suffix}`, gender: isFemale ? "kadin" : "erkek" };
+  const first = pickRandom(isFemale ? FEMALE_NAMES : MALE_NAMES);
+  const last = pickRandom(SURNAMES);
+  const firstPart = usernamePart(first);
+  const lastPart = usernamePart(last);
+  const pattern = randomInt(1, 100);
+
+  let username: string;
+
+  if (pattern <= 35) {
+    // zeynep89, emre42
+    username = `${firstPart}${randomInt(1, 99)}`;
+  } else if (pattern <= 55) {
+    // ayse_kaya
+    username = `${firstPart}_${lastPart}`;
+  } else if (pattern <= 70) {
+    // mehmet.yilmaz
+    username = `${firstPart}.${lastPart}`;
+  } else if (pattern <= 82) {
+    // elif_sahin92
+    username = `${firstPart}_${lastPart}${randomInt(1, 99)}`;
+  } else if (pattern <= 92) {
+    // can2001, zeynep98 (doğum yılı hissi)
+    username = `${firstPart}${randomInt(90, 2006)}`;
+  } else {
+    // melisk67 — isim + soyisim baş harfi
+    username = `${firstPart}${lastPart.charAt(0)}${randomInt(10, 99)}`;
+  }
+
+  return { username, gender: isFemale ? "kadin" : "erkek" };
 }
 
 export function generateEmail(username: string): string {

@@ -10,7 +10,7 @@ import {
   pickAnswerer,
   pickLiker,
 } from "./actions.js";
-import { isGeminiEnabled } from "./gemini.js";
+import { isOpenAiEnabled } from "./openai.js";
 import { pickRandom, randomInt } from "./generators.js";
 
 const MIN_DELAY = Number(process.env.BOT_MIN_DELAY_MS ?? 25000);
@@ -127,7 +127,7 @@ async function cycle() {
 async function main() {
   log("Nexis Forum Bot başlatıldı — nexisaiform.com");
   log(
-    `Gemini: ${isGeminiEnabled() ? "AÇIK (insan üslubu)" : "KAPALI — GOOGLE_AI_API_KEY ekle"}`
+    `OpenAI: ${isOpenAiEnabled() ? "AÇIK (insan üslubu)" : "KAPALI — OPENAI_API_KEY ekle"}`
   );
   log(`Gecikme: ${MIN_DELAY}-${MAX_DELAY}ms | Tur başına: 1-${ACTIONS_PER_CYCLE} aksiyon`);
 
