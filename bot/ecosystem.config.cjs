@@ -1,3 +1,4 @@
+// Sunucu-only: VPS'te `pm2 start ecosystem.config.cjs` — Vercel'de ÇALIŞMAZ
 module.exports = {
   apps: [
     {
