@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI, type GenerativeModel } from "@google/generative-ai";
 import {
   generateAnswer,
   generateQuestion,
@@ -19,7 +19,14 @@ ZORUNLU ÜSLUP KURALLARI (buna kesinlikle uy):
 - Markdown, başlık, etiket kullanma. Düz metin.
 `.trim();
 
+const DEFAULT_MODELS = [
+  "gemini-2.0-flash-lite",
+  "gemini-1.5-flash",
+  "gemini-2.0-flash",
+];
+
 let client: GoogleGenerativeAI | null = null;
+let lastGeminiCallAt = 0;
 
 function getGemini(): GoogleGenerativeAI | null {
   const key = process.env.GOOGLE_AI_API_KEY ?? process.env.GEMINI_API_KEY;
@@ -31,11 +38,17 @@ function getGemini(): GoogleGenerativeAI | null {
   return client;
 }
 
-function getModel() {
+function getModelNames(): string[] {
+  const primary = process.env.GEMINI_MODEL?.trim();
+  if (primary) {
+    return [primary, ...DEFAULT_MODELS.filter((m) => m !== primary)];
+  }
+  return DEFAULT_MODELS;
+}
+
+function createModel(modelName: string): GenerativeModel | null {
   const genAI = getGemini();
   if (!genAI) return null;
-
-  const modelName = process.env.GEMINI_MODEL ?? "gemini-2.0-flash";
 
   return genAI.getGenerativeModel({
     model: modelName,
@@ -60,6 +73,64 @@ function parseJson<T>(raw: string): T | null {
   }
 }
 
+function parseRetryMs(message: string): number | null {
+  const match = message.match(/retry in ([0-9.]+)s/i);
+  if (!match) return null;
+  return Math.ceil(parseFloat(match[1]!) * 1000) + 1000;
+}
+
+function isQuotaError(message: string): boolean {
+  return /429|quota|rate limit|too many requests/i.test(message);
+}
+
+async function waitForGeminiSlot(): Promise<void> {
+  const minGap = Number(process.env.GEMINI_MIN_INTERVAL_MS ?? 65000);
+  const elapsed = Date.now() - lastGeminiCallAt;
+  if (elapsed < minGap) {
+    await sleep(minGap - elapsed);
+  }
+}
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function generateText(prompt: string): Promise<string | null> {
+  const models = getModelNames();
+
+  for (const modelName of models) {
+    const model = createModel(modelName);
+    if (!model) return null;
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await waitForGeminiSlot();
+        const result = await model.generateContent(prompt);
+        lastGeminiCallAt = Date.now();
+        return result.response.text();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const retryMs = parseRetryMs(message);
+
+        if (isQuotaError(message)) {
+          if (retryMs && attempt === 0) {
+            console.warn(`[Gemini] Kota — ${Math.round(retryMs / 1000)} sn bekleniyor (${modelName})`);
+            await sleep(retryMs);
+            continue;
+          }
+          console.warn(`[Gemini] Kota aşıldı, model değiştiriliyor: ${modelName}`);
+          break;
+        }
+
+        console.warn(`[Gemini] Hata (${modelName}):`, message);
+        break;
+      }
+    }
+  }
+
+  return null;
+}
+
 const TONES = [
   "biraz endişeli ve kararsız",
   "meraklı ama rahat",
@@ -81,11 +152,10 @@ export async function generateHumanQuestion(
   category: string,
   author: { username: string; gender: "erkek" | "kadin" | "bot" }
 ): Promise<{ title: string; content: string; source: "gemini" | "fallback" }> {
-  const model = getModel();
   const tone = pickRandom(TONES);
   const genderLabel = author.gender === "kadin" ? "kadın" : "erkek";
 
-  if (!model) {
+  if (!getGemini()) {
     const q = generateQuestion(category);
     return { ...q, source: "fallback" };
   }
@@ -107,20 +177,15 @@ title: en fazla 90 karakter, soru gibi bitsin
 content: 2-4 cümle, detay ve duygu olsun
 `.trim();
 
-  try {
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
-    const parsed = parseJson<{ title: string; content: string }>(text);
+  const text = await generateText(prompt);
+  const parsed = text ? parseJson<{ title: string; content: string }>(text) : null;
 
-    if (parsed?.title?.trim() && parsed?.content?.trim()) {
-      return {
-        title: parsed.title.trim().slice(0, 120),
-        content: parsed.content.trim().slice(0, 1200),
-        source: "gemini",
-      };
-    }
-  } catch (err) {
-    console.warn("[Gemini] Soru üretilemedi:", err instanceof Error ? err.message : err);
+  if (parsed?.title?.trim() && parsed?.content?.trim()) {
+    return {
+      title: parsed.title.trim().slice(0, 120),
+      content: parsed.content.trim().slice(0, 1200),
+      source: "gemini",
+    };
   }
 
   const q = generateQuestion(category);
@@ -131,11 +196,10 @@ export async function generateHumanAnswer(
   question: { title: string; content: string; category?: string },
   answerer: { username: string; gender: "erkek" | "kadin" | "bot" }
 ): Promise<{ content: string; source: "gemini" | "fallback" }> {
-  const model = getModel();
   const tone = pickRandom(ANSWER_TONES);
   const genderLabel = answerer.gender === "kadin" ? "kadın" : "erkek";
 
-  if (!model) {
+  if (!getGemini()) {
     return { content: generateAnswer(), source: "fallback" };
   }
 
@@ -157,19 +221,14 @@ Sadece şu JSON formatında cevap ver:
 {"content":"..."}
 `.trim();
 
-  try {
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
-    const parsed = parseJson<{ content: string }>(text);
+  const text = await generateText(prompt);
+  const parsed = text ? parseJson<{ content: string }>(text) : null;
 
-    if (parsed?.content?.trim()) {
-      return {
-        content: parsed.content.trim().slice(0, 900),
-        source: "gemini",
-      };
-    }
-  } catch (err) {
-    console.warn("[Gemini] Cevap üretilemedi:", err instanceof Error ? err.message : err);
+  if (parsed?.content?.trim()) {
+    return {
+      content: parsed.content.trim().slice(0, 900),
+      source: "gemini",
+    };
   }
 
   return { content: generateAnswer(), source: "fallback" };
@@ -180,6 +239,5 @@ export function isGeminiEnabled(): boolean {
 }
 
 export async function geminiCooldown(): Promise<void> {
-  const extra = randomInt(500, 2000);
-  await new Promise((r) => setTimeout(r, extra));
+  await sleep(randomInt(1000, 3000));
 }
