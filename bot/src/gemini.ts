@@ -20,8 +20,9 @@ ZORUNLU ÜSLUP KURALLARI (buna kesinlikle uy):
 `.trim();
 
 const DEFAULT_MODELS = [
+  "gemini-2.5-flash-lite",
+  "gemini-2.5-flash",
   "gemini-2.0-flash-lite",
-  "gemini-1.5-flash",
   "gemini-2.0-flash",
 ];
 
@@ -83,8 +84,15 @@ function isQuotaError(message: string): boolean {
   return /429|quota|rate limit|too many requests/i.test(message);
 }
 
+function shouldTryNextModel(message: string): boolean {
+  return (
+    isQuotaError(message) ||
+    /404|not found|not supported for generatecontent/i.test(message)
+  );
+}
+
 async function waitForGeminiSlot(): Promise<void> {
-  const minGap = Number(process.env.GEMINI_MIN_INTERVAL_MS ?? 65000);
+  const minGap = Number(process.env.GEMINI_MIN_INTERVAL_MS ?? 90000);
   const elapsed = Date.now() - lastGeminiCallAt;
   if (elapsed < minGap) {
     await sleep(minGap - elapsed);
@@ -112,13 +120,13 @@ async function generateText(prompt: string): Promise<string | null> {
         const message = err instanceof Error ? err.message : String(err);
         const retryMs = parseRetryMs(message);
 
-        if (isQuotaError(message)) {
-          if (retryMs && attempt === 0) {
+        if (shouldTryNextModel(message)) {
+          if (isQuotaError(message) && retryMs && attempt === 0) {
             console.warn(`[Gemini] Kota — ${Math.round(retryMs / 1000)} sn bekleniyor (${modelName})`);
             await sleep(retryMs);
             continue;
           }
-          console.warn(`[Gemini] Kota aşıldı, model değiştiriliyor: ${modelName}`);
+          console.warn(`[Gemini] Model atlanıyor: ${modelName}`);
           break;
         }
 
