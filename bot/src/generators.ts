@@ -254,8 +254,52 @@ export function generateUsername(): { username: string; gender: "erkek" | "kadin
   return { username, gender: isFemale ? "kadin" : "erkek" };
 }
 
-export function generateEmail(username: string): string {
-  return `${username.toLowerCase()}@bot.nexisaiform.com`;
+const EMAIL_DOMAINS = [
+  "gmail.com",
+  "hotmail.com",
+  "outlook.com",
+  "yahoo.com",
+  "icloud.com",
+] as const;
+
+export function generateRandomEmail(username: string): string {
+  const domain = pickRandom(EMAIL_DOMAINS);
+  const base = usernamePart(username.replace(/[._]/g, ""));
+  const unique = Date.now().toString().slice(-5) + randomInt(10, 99);
+  const pattern = randomInt(1, 100);
+
+  if (pattern <= 45) {
+    return `${base}${unique}@${domain}`;
+  }
+  if (pattern <= 75) {
+    return `${base}.${randomInt(1988, 2005)}${randomInt(1, 9)}@${domain}`;
+  }
+  if (pattern <= 90) {
+    return `${base}_${randomInt(1, 99)}${unique.slice(-2)}@${domain}`;
+  }
+  return `${base}${randomInt(10, 99)}${unique.slice(-3)}@${domain}`;
+}
+
+export function generatePassword(): string {
+  const lower = "abcdefghijklmnopqrstuvwxyz";
+  const upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const digits = "0123456789";
+  const all = lower + upper + digits;
+  const length = randomInt(8, 14);
+
+  let password =
+    pickRandom(lower.split("")) +
+    pickRandom(upper.split("")) +
+    pickRandom(digits.split(""));
+
+  for (let i = password.length; i < length; i++) {
+    password += pickRandom(all.split(""));
+  }
+
+  return password
+    .split("")
+    .sort(() => Math.random() - 0.5)
+    .join("");
 }
 
 export function generateQuestion(category: string) {

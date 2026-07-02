@@ -1,9 +1,7 @@
 import {
-  generateEmail,
   generateSlug,
-  generateUsername,
   pickRandom,
-  randomNexisPoint,
+  randomInt,
   CATEGORIES,
 } from "./generators.js";
 import {
@@ -19,45 +17,14 @@ export interface FullQuestion extends BotQuestion {
   views_count: number;
 }
 
-export async function fetchRandomUsers(limit = 20): Promise<BotUser[]> {
-  const supabase = getBotSupabase();
-  const { data, error } = await supabase
-    .from("forum_users")
-    .select("id, username, gender")
-    .order("created_at", { ascending: false })
-    .limit(limit);
-
-  if (error) throw new Error(error.message);
-  return (data ?? []) as BotUser[];
-}
-
-export async function createBotUser(): Promise<BotUser> {
-  const supabase = getBotSupabase();
-  const { username, gender } = generateUsername();
-  const email = generateEmail(username);
-
-  const { data, error } = await supabase
-    .from("forum_users")
-    .insert({
-      username,
-      email,
-      gender,
-      nexis_point: randomNexisPoint(),
-    })
-    .select("id, username, gender")
-    .single();
-
-  if (error) {
-    if (error.code === "23505") return createBotUser();
-    throw new Error(error.message);
-  }
-
-  return data as BotUser;
+export interface CreatedQuestion extends BotQuestion {
+  category: string;
+  source: string;
 }
 
 export async function createBotQuestion(
   user: BotUser
-): Promise<BotQuestion & { source: string }> {
+): Promise<CreatedQuestion> {
   const supabase = getBotSupabase();
   const category = pickRandom(CATEGORIES);
 
@@ -84,14 +51,22 @@ export async function createBotQuestion(
     throw new Error(error.message);
   }
 
-  return { ...(data as BotQuestion), source: generated.source };
+  return {
+    ...(data as BotQuestion),
+    category,
+    source: generated.source,
+  };
 }
 
-export async function fetchRecentQuestions(limit = 15): Promise<FullQuestion[]> {
+export async function fetchQuestionsByOthers(
+  userId: string,
+  limit = 30
+): Promise<FullQuestion[]> {
   const supabase = getBotSupabase();
   const { data, error } = await supabase
     .from("forum_questions")
     .select("id, user_id, title, slug, content, category, views_count")
+    .neq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(limit);
 
@@ -154,44 +129,16 @@ export async function likeQuestion(
   return true;
 }
 
-export async function bumpViews(questionId: string, current: number): Promise<void> {
-  const supabase = getBotSupabase();
-  await supabase
-    .from("forum_questions")
-    .update({ views_count: current + randomIntViews() })
-    .eq("id", questionId);
+export function pickQuestionDifferentTopic(
+  questions: FullQuestion[],
+  ownCategory: string
+): FullQuestion | null {
+  if (questions.length === 0) return null;
+
+  const different = questions.filter((q) => q.category !== ownCategory);
+  return pickRandom(different.length > 0 ? different : questions);
 }
 
 function randomIntViews(): number {
   return Math.floor(Math.random() * 40) + 1;
-}
-
-export async function pickAnswerer(
-  questionAuthorId: string,
-  users: BotUser[]
-): Promise<BotUser | null> {
-  const candidates = users.filter((u) => u.id !== questionAuthorId);
-  if (candidates.length === 0) {
-    const fresh = await createBotUser();
-    return fresh.id === questionAuthorId ? null : fresh;
-  }
-  return pickRandom(candidates);
-}
-
-export async function pickLiker(
-  excludeIds: string[],
-  users: BotUser[]
-): Promise<BotUser> {
-  const candidates = users.filter((u) => !excludeIds.includes(u.id));
-  if (candidates.length === 0) return createBotUser();
-  return pickRandom(candidates);
-}
-
-export async function ensureUserPool(min = 8): Promise<BotUser[]> {
-  let users = await fetchRandomUsers(50);
-  while (users.length < min) {
-    const created = await createBotUser();
-    users = [created, ...users];
-  }
-  return users;
 }

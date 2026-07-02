@@ -1,28 +1,27 @@
 import "dotenv/config";
 import {
-  bumpViews,
   createBotAnswer,
   createBotQuestion,
-  createBotUser,
-  ensureUserPool,
-  fetchRecentQuestions,
+  fetchQuestionsByOthers,
   likeQuestion,
-  pickAnswerer,
-  pickLiker,
+  pickQuestionDifferentTopic,
 } from "./actions.js";
+import { randomInt } from "./generators.js";
 import { isOpenAiEnabled } from "./openai.js";
-import { pickRandom, randomInt } from "./generators.js";
+import {
+  loginBotAccount,
+  logoutBotAccount,
+  registerBotAccount,
+} from "./session.js";
 
-const MIN_DELAY = Number(process.env.BOT_MIN_DELAY_MS ?? 25000);
-const MAX_DELAY = Number(process.env.BOT_MAX_DELAY_MS ?? 90000);
-const ACTIONS_PER_CYCLE = Number(process.env.BOT_ACTIONS_PER_CYCLE ?? 2);
+const TOUR_DELAY_MS = Number(process.env.BOT_TOUR_DELAY_MS ?? 10000);
+const ANSWERS_PER_SESSION_MIN = Number(process.env.BOT_ANSWERS_MIN ?? 1);
+const ANSWERS_PER_SESSION_MAX = Number(process.env.BOT_ANSWERS_MAX ?? 2);
+
+let lastSessionUserId: string | null = null;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function randomDelay() {
-  return randomInt(MIN_DELAY, MAX_DELAY);
 }
 
 function log(message: string) {
@@ -30,115 +29,90 @@ function log(message: string) {
   console.log(`[${time}] ${message}`);
 }
 
-type ActionType = "register" | "question" | "answer" | "like" | "views";
+function shortId(id: string): string {
+  return id.slice(0, 8);
+}
 
-async function runAction(type: ActionType): Promise<void> {
-  const users = await ensureUserPool(10);
+async function runSessionCycle(): Promise<void> {
+  const registered = await registerBotAccount();
 
-  switch (type) {
-    case "register": {
-      const user = await createBotUser();
-      log(`Yeni kullanıcı: @${user.username} (${user.gender})`);
+  if (registered.id === lastSessionUserId) {
+    throw new Error(
+      `Aynı hesap tekrar seçildi (@${registered.username} / ${registered.id})`
+    );
+  }
+
+  log(
+    `Kayıt: @${registered.username} [${shortId(registered.id)}] (${registered.email})`
+  );
+
+  const session = await loginBotAccount(registered.email, registered.password);
+
+  if (session.id !== registered.id) {
+    throw new Error("Kayıt ve giriş hesapları eşleşmiyor.");
+  }
+
+  log(`Giriş: @${session.username} [${shortId(session.id)}]`);
+  lastSessionUserId = session.id;
+
+  await sleep(randomInt(1500, 4000));
+
+  const question = await createBotQuestion(session);
+  log(
+    `Soru [${question.source}]: "${question.title}" — @${session.username} [${shortId(session.id)}] (${question.category})`
+  );
+
+  const answerCount = randomInt(ANSWERS_PER_SESSION_MIN, ANSWERS_PER_SESSION_MAX);
+
+  for (let i = 0; i < answerCount; i++) {
+    await sleep(randomInt(2000, 5000));
+
+    const others = await fetchQuestionsByOthers(session.id, 40);
+    const target = pickQuestionDifferentTopic(others, question.category);
+
+    if (!target) {
+      log("Cevaplanacak başka soru yok.");
       break;
     }
-    case "question": {
-      const author = pickRandom(users);
-      const q = await createBotQuestion(author);
-      log(`Soru [${q.source}]: "${q.title}" — @${author.username}`);
-      break;
-    }
-    case "answer": {
-      const questions = await fetchRecentQuestions(20);
-      if (questions.length === 0) {
-        const author = pickRandom(users);
-        const q = await createBotQuestion(author);
-        log(`Soru (cevap yoktu) [${q.source}]: "${q.title}"`);
-        break;
-      }
-      const target = pickRandom(questions);
-      const answerer = await pickAnswerer(target.user_id, users);
-      if (!answerer) break;
-      const result = await createBotAnswer(target, answerer);
-      log(
-        `Cevap [${result.source}]: "${target.title.slice(0, 40)}..." — @${answerer.username}`
-      );
-      break;
-    }
-    case "like": {
-      const questions = await fetchRecentQuestions(25);
-      if (questions.length === 0) break;
-      const target = pickRandom(questions);
-      const liker = await pickLiker([target.user_id], users);
-      const liked = await likeQuestion(target.id, liker);
+
+    const result = await createBotAnswer(target, session);
+    log(
+      `Cevap [${result.source}]: @${session.username} [${shortId(session.id)}] → "${target.title.slice(0, 45)}..." (${target.category})`
+    );
+  }
+
+  if (Math.random() > 0.5) {
+    await sleep(randomInt(1000, 3000));
+    const others = await fetchQuestionsByOthers(session.id, 25);
+    const toLike = pickQuestionDifferentTopic(others, question.category);
+    if (toLike) {
+      const liked = await likeQuestion(toLike.id, session);
       if (liked) {
-        log(`Beğeni: "${target.title.slice(0, 40)}..." — @${liker.username}`);
+        log(`Beğeni: @${session.username} [${shortId(session.id)}]`);
       }
-      break;
-    }
-    case "views": {
-      const questions = await fetchRecentQuestions(10);
-      if (questions.length === 0) break;
-      const target = pickRandom(questions);
-      await bumpViews(target.id, target.views_count);
-      log(`Görüntülenme artırıldı: "${target.title.slice(0, 40)}..."`);
-      break;
     }
   }
-}
 
-function pickActions(): ActionType[] {
-  const pool: ActionType[] = [
-    "register",
-    "register",
-    "question",
-    "question",
-    "answer",
-    "answer",
-    "answer",
-    "like",
-    "like",
-    "views",
-  ];
-
-  const count = randomInt(1, ACTIONS_PER_CYCLE);
-  const picked: ActionType[] = [];
-
-  for (let i = 0; i < count; i++) {
-    picked.push(pickRandom(pool));
-  }
-
-  return picked;
-}
-
-async function cycle() {
-  const actions = pickActions();
-  log(`Tur başladı (${actions.length} aksiyon)`);
-
-  for (const action of actions) {
-    try {
-      await runAction(action);
-    } catch (err) {
-      log(`Hata (${action}): ${err instanceof Error ? err.message : String(err)}`);
-    }
-    await sleep(randomInt(3000, 8000));
-  }
+  logoutBotAccount(session);
+  log(`Çıkış: @${session.username} [${shortId(session.id)}]`);
 }
 
 async function main() {
-  log("Nexis Forum Bot başlatıldı — nexisaiform.com");
+  log("Nexis Forum Bot — kayıt → giriş → soru → cevap → çıkış");
   log(
-    `OpenAI: ${isOpenAiEnabled() ? "AÇIK (insan üslubu)" : "KAPALI — OPENAI_API_KEY ekle"}`
+    `OpenAI: ${isOpenAiEnabled() ? "AÇIK" : "KAPALI — OPENAI_API_KEY ekle"}`
   );
-  log(`Gecikme: ${MIN_DELAY}-${MAX_DELAY}ms | Tur başına: 1-${ACTIONS_PER_CYCLE} aksiyon`);
-
-  await ensureUserPool(5);
-  log("Kullanıcı havuzu hazır.");
+  log(`Tur aralığı: ${TOUR_DELAY_MS / 1000} sn`);
 
   while (true) {
-    await cycle();
-    const wait = randomDelay();
-    log(`Sonraki tur ${Math.round(wait / 1000)} sn sonra...`);
-    await sleep(wait);
+    try {
+      await runSessionCycle();
+    } catch (err) {
+      log(`Tur hatası: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    log(`Yeni hesap ${TOUR_DELAY_MS / 1000} sn sonra...`);
+    await sleep(TOUR_DELAY_MS);
   }
 }
 
