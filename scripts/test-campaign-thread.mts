@@ -5,7 +5,7 @@
 process.env.NEXT_PUBLIC_SITE_URL = "http://localhost:3000";
 
 const { runCampaignThread } = await import(
-  "../src/lib/campaign-thread/run-campaign-thread.ts"
+  "../src/lib/campaign-thread/run-campaign-thread"
 );
 
 const result = await runCampaignThread({
