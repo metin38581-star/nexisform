@@ -12,16 +12,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AskQuestionModal } from "@/components/AskQuestionModal";
 import { AuthModal } from "@/components/AuthModal";
 import {
-  CategoryQuestionGroup,
+  QuestionCard,
   RightPanel,
   Sidebar,
 } from "@/components/ForumLayout";
 import { UserBadge } from "@/components/UserBadge";
 import { logout, restoreSession } from "@/lib/auth";
-import {
-  categorySectionId,
-  groupQuestionsByCategory,
-} from "@/lib/categories";
 import { normalizeQuestion } from "@/lib/forum-queries";
 import { getSupabase } from "@/lib/supabase";
 import type { ForumQuestion, SessionUser } from "@/lib/types";
@@ -150,8 +146,12 @@ export function HomePageClient({ initialQuestions }: HomePageClientProps) {
     });
   };
 
-  const groupedQuestions = useMemo(
-    () => groupQuestionsByCategory(questions),
+  const sortedQuestions = useMemo(
+    () =>
+      [...questions].sort(
+        (a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      ),
     [questions]
   );
 
@@ -163,11 +163,6 @@ export function HomePageClient({ initialQuestions }: HomePageClientProps) {
     }
     return counts;
   }, [questions]);
-
-  const scrollToCategory = useCallback((category: string) => {
-    const el = document.getElementById(categorySectionId(category));
-    el?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, []);
 
   if (!isMounted) {
     return (
@@ -245,10 +240,7 @@ export function HomePageClient({ initialQuestions }: HomePageClientProps) {
         </header>
 
         <div className="mx-auto flex max-w-7xl gap-6 px-4 py-6 sm:px-6">
-          <Sidebar
-            categoryCounts={categoryCounts}
-            onCategoryClick={scrollToCategory}
-          />
+          <Sidebar categoryCounts={categoryCounts} />
 
           <main className="min-w-0 flex-1">
             <div className="mb-6">
@@ -256,7 +248,7 @@ export function HomePageClient({ initialQuestions }: HomePageClientProps) {
                 Canlı Akış
               </h1>
               <p className="mt-1 text-sm text-slate-500">
-                Sorular kategorilere göre gruplandı — anlık güncellenir.
+                En yeni yayınlanan içerikler üstte — anlık güncellenir.
               </p>
             </div>
 
@@ -278,12 +270,11 @@ export function HomePageClient({ initialQuestions }: HomePageClientProps) {
                 </button>
               </div>
             ) : (
-              <div className="space-y-10">
-                {groupedQuestions.map(({ category, questions: items }) => (
-                  <CategoryQuestionGroup
-                    key={category}
-                    category={category}
-                    questions={items}
+              <div className="space-y-4">
+                {sortedQuestions.map((question) => (
+                  <QuestionCard
+                    key={question.id}
+                    question={question}
                     session={session}
                     onAuthRequired={() => setAuthOpen(true)}
                     onLikesChange={handleLikesChange}
